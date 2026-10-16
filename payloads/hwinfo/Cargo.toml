@@ -1,0 +1,10 @@
+[package]
+name = "hwinfo"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+crate-type = ["staticlib"]
+
+[dependencies]
+ps5.workspace = true

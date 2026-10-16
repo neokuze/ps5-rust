@@ -1,0 +1,10 @@
+[package]
+name = "ps5-sys"
+description = "Raw bindgen bindings to the PS5 payload SDK"
+version.workspace = true
+edition.workspace = true
+build = "build.rs"
+links = "ps5"
+
+[build-dependencies]
+bindgen = { version = "0.72", default-features = false, features = ["runtime"] }

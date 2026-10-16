@@ -1,0 +1,17 @@
+[workspace]
+resolver = "2"
+members = ["crates/ps5-sys", "crates/ps5", "payloads/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+
+[workspace.dependencies]
+ps5-sys = { path = "crates/ps5-sys" }
+ps5 = { path = "crates/ps5" }
+
+[profile.release]
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+debug = false

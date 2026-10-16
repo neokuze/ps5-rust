@@ -1,0 +1,6 @@
+[build]
+target = "x86_64-unknown-linux-gnu"
+rustflags = ["-C", "relocation-model=pic", "-C", "target-cpu=znver2", "-Zunstable-options", "-Cpanic=immediate-abort"]
+
+[unstable]
+build-std = ["core"]

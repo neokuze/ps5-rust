@@ -1,0 +1,8 @@
+[package]
+name = "ps5"
+description = "Safe wrappers over ps5-sys"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+ps5-sys.workspace = true
