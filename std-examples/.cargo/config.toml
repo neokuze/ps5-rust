@@ -13,3 +13,9 @@ rustflags = ["-Zunstable-options", "--cfg", "mio_unsupported_force_waker_pipe"]
 [unstable]
 build-std = ["std", "panic_abort"]
 json-target-spec = true
+
+# C code in crates (ring, ...) must be built by the SDK's compiler, not the
+# host's: cc-rs reads these for the PS5 target.
+[env]
+CC_x86_64-sie-ps5-std = "/opt/ps5-payload-sdk/bin/prospero-clang"
+AR_x86_64-sie-ps5-std = "/opt/ps5-payload-sdk/bin/prospero-ar"

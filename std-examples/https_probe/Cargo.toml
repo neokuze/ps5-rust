@@ -1,0 +1,12 @@
+[package]
+name = "https_probe"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+ps5 = { path = "../../crates/ps5", features = ["notify"] }
+ps5-std-rt = { path = "../../crates/ps5-std-rt" }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+webpki-roots = "1"

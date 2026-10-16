@@ -32,6 +32,7 @@ std-examples/          std payloads (own workspace, std target):
   tokio_server         async HTTP server with tokio on port 9956
   kq_probe             diagnostics for the kqueue/fd calls tokio needs
   fs_probe             std::fs checks in a scratch dir under /data (port 9958)
+  https_probe          DNS + HTTPS GET with rustls/ring, verified certs (port 9959)
 ```
 
 `ps5` modules (each one behind a Cargo feature that links the Sony libraries it needs):
@@ -78,6 +79,7 @@ FreeBSD 11 with some gaps, and Rust assumes FreeBSD 12, so payloads also depend 
 | `struct kevent` is the 32-byte FreeBSD 11 layout; libc uses the 64-byte 12 one | `kevent` converts and calls the syscall |
 | `fcntl(F_DUPFD_CLOEXEC)` fails with `EOPNOTSUPP` (breaks `try_clone` and tokio) | emulates it with `F_DUPFD` + `F_SETFD` |
 | `struct stat` is the 120-byte FreeBSD 11 one; libc uses the 224-byte 12 one | `stat`/`lstat`/`fstat` call the FreeBSD 11 syscalls and widen the result |
+| `getrandom()` doesn't exist (FreeBSD 12+); the getrandom crate (ring, rustls) needs it | implements it over `arc4random_buf` |
 | `struct dirent` has a 32-bit `d_fileno` and no `d_off` | own `opendir`/`readdir`/`closedir`/`fdopendir`/`dirfd` over `getdirentries`, widening each entry (buffer sized from `st_blksize`: 64 KB on `/data`) |
 
 ```bash
@@ -95,6 +97,13 @@ async fn main() { /* ... */ }
 
 `std` payloads are bigger (about 130 KB for `hello_std`, 480 KB for `tokio_server`) and
 show panics through a panic hook instead of vanishing.
+
+Networking beyond tokio works too: DNS through std (`getaddrinfo`, e.g.
+`TcpStream::connect(("example.com", 443))`) and HTTPS with rustls + ring, certificates checked
+against `webpki-roots` (TLS 1.3, checked by `https_probe`). Crates with C code build with the
+SDK's compiler: `std-examples/.cargo/config.toml` sets `CC_x86_64-sie-ps5-std` and
+`AR_x86_64-sie-ps5-std` to `prospero-clang`/`prospero-ar`, otherwise cc-rs falls back to the
+host's gcc.
 
 `std::fs` works (read/write, metadata, `read_dir`, copy, rename, `canonicalize`,
 `remove_dir_all`, checked by `fs_probe`). One gap: `fstatat` isn't converted, because the

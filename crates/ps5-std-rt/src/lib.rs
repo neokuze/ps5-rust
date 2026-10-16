@@ -474,3 +474,18 @@ pub unsafe extern "C" fn closedir(d: *mut Dir) -> c_int {
 pub unsafe extern "C" fn dirfd(d: *mut Dir) -> c_int {
     (*d).fd
 }
+
+// ---------------------------------------------------------------------------
+// getrandom(2) appeared in FreeBSD 12; the getrandom crate (rustls/ring)
+// calls it. arc4random_buf, which std already uses on the console, is
+// seeded by the kernel and never fails, so it serves every flag.
+
+extern "C" {
+    fn arc4random_buf(buf: *mut c_void, n: usize);
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn getrandom(buf: *mut c_void, len: usize, _flags: u32) -> isize {
+    arc4random_buf(buf, len);
+    len as isize
+}
