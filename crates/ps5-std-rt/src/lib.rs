@@ -11,7 +11,9 @@
 //! - empty stand-ins for libraries std asks the linker for (build.rs);
 //! - `accept4`, `pthread_setname_np`, `dl_iterate_phdr`, missing from the SDK;
 //! - `kevent`, converting FreeBSD 12 `struct kevent` to the 11 layout;
-//! - `fcntl`, emulating `F_DUPFD_CLOEXEC` (rejected by the PS5 kernel).
+//! - `fcntl`, emulating `F_DUPFD_CLOEXEC` (rejected by the PS5 kernel);
+//! - `stat`/`lstat`/`fstat` and the `DIR` API, converting FreeBSD 11
+//!   `struct stat` / `struct dirent` to the 12 layouts.
 use core::ffi::{c_char, c_int, c_void};
 
 const F_SETFD: c_int = 2;
@@ -195,4 +197,280 @@ pub unsafe extern "C" fn fcntl(fd: c_int, cmd: c_int, arg: usize) -> c_int {
         return -1;
     }
     new
+}
+
+// ---------------------------------------------------------------------------
+// stat family: the PS5 kernel has the FreeBSD 11 `struct stat` (120 bytes,
+// 32-bit ino/dev, 16-bit nlink); Rust's libc uses the FreeBSD 12 one (224
+// bytes). Call the FreeBSD 11 syscalls and widen the result.
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct Timespec {
+    sec: i64,
+    nsec: i64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct Stat11 {
+    dev: u32,
+    ino: u32,
+    mode: u16,
+    nlink: u16,
+    uid: u32,
+    gid: u32,
+    rdev: u32,
+    atim: Timespec,
+    mtim: Timespec,
+    ctim: Timespec,
+    size: i64,
+    blocks: i64,
+    blksize: i32,
+    flags: u32,
+    gen: u32,
+    lspare: i32,
+    birthtim: Timespec,
+}
+
+/// FreeBSD 12+ `struct stat`, as in the libc crate.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct Stat12 {
+    pub dev: u64,
+    pub ino: u64,
+    pub nlink: u64,
+    pub mode: u16,
+    pad0: i16,
+    pub uid: u32,
+    pub gid: u32,
+    pad1: i32,
+    pub rdev: u64,
+    pub atime: i64,
+    pub atime_nsec: i64,
+    pub mtime: i64,
+    pub mtime_nsec: i64,
+    pub ctime: i64,
+    pub ctime_nsec: i64,
+    pub birthtime: i64,
+    pub birthtime_nsec: i64,
+    pub size: i64,
+    pub blocks: i64,
+    pub blksize: i32,
+    pub flags: u32,
+    pub gen: u64,
+    spare: [u64; 10],
+}
+
+const _: () = assert!(core::mem::size_of::<Stat11>() == 120);
+const _: () = assert!(core::mem::size_of::<Stat12>() == 224);
+
+const SYS_STAT11: u64 = 188;
+const SYS_FSTAT11: u64 = 189;
+const SYS_LSTAT11: u64 = 190;
+
+unsafe fn widen_stat(old: &Stat11, out: *mut Stat12) {
+    *out = Stat12 {
+        dev: old.dev as u64,
+        ino: old.ino as u64,
+        nlink: old.nlink as u64,
+        mode: old.mode,
+        pad0: 0,
+        uid: old.uid,
+        gid: old.gid,
+        pad1: 0,
+        rdev: old.rdev as u64,
+        atime: old.atim.sec,
+        atime_nsec: old.atim.nsec,
+        mtime: old.mtim.sec,
+        mtime_nsec: old.mtim.nsec,
+        ctime: old.ctim.sec,
+        ctime_nsec: old.ctim.nsec,
+        birthtime: old.birthtim.sec,
+        birthtime_nsec: old.birthtim.nsec,
+        size: old.size,
+        blocks: old.blocks,
+        blksize: old.blksize,
+        flags: old.flags,
+        gen: old.gen as u64,
+        spare: [0; 10],
+    };
+}
+
+/// Runs a FreeBSD 11 stat-style syscall into a temporary and widens it.
+unsafe fn stat_call(n: u64, args: [u64; 6], buf_arg: usize, out: *mut Stat12) -> c_int {
+    let mut old: Stat11 = core::mem::zeroed();
+    let mut a = args;
+    a[buf_arg] = &mut old as *mut Stat11 as u64;
+    let ret = syscall6(n, a);
+    if ret == 0 {
+        widen_stat(&old, out);
+    }
+    ret as c_int
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn stat(path: *const c_char, buf: *mut Stat12) -> c_int {
+    stat_call(SYS_STAT11, [path as u64, 0, 0, 0, 0, 0], 1, buf)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn lstat(path: *const c_char, buf: *mut Stat12) -> c_int {
+    stat_call(SYS_LSTAT11, [path as u64, 0, 0, 0, 0, 0], 1, buf)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn fstat(fd: c_int, buf: *mut Stat12) -> c_int {
+    stat_call(SYS_FSTAT11, [fd as u64, 0, 0, 0, 0, 0], 1, buf)
+}
+
+// fstatat is not wrapped: the SDK's libc.a defines it in the same object as
+// syscalls std needs, so a second definition clashes. std doesn't call it on
+// FreeBSD; crates that do still get the FreeBSD 11 layout.
+
+// ---------------------------------------------------------------------------
+// Directories: the console's readdir returns FreeBSD 11 `struct dirent`
+// (32-bit d_fileno, no d_off); std reads the FreeBSD 12 one. Replacing
+// readdir hides the original, so the whole DIR API is implemented here on
+// top of the console's getdirentries (FreeBSD 11 records), widening each
+// entry.
+
+/// FreeBSD 12+ `struct dirent`, as in the libc crate.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct Dirent12 {
+    pub fileno: u64,
+    pub off: i64,
+    pub reclen: u16,
+    pub kind: u8,
+    pad0: u8,
+    pub namlen: u16,
+    pad1: u16,
+    pub name: [c_char; 256],
+}
+
+/// Header of a FreeBSD 11 dirent record (the name follows).
+#[repr(C)]
+struct Dirent11Head {
+    fileno: u32,
+    reclen: u16,
+    kind: u8,
+    namlen: u8,
+}
+
+// getdirentries fails with EINVAL if the buffer is smaller than the
+// filesystem's block size (e.g. /data), so size it from st_blksize like
+// FreeBSD's own opendir does.
+const DIRBUF_MIN: usize = 8192;
+const DIRBUF_MAX: usize = 1 << 20;
+const O_RDONLY: c_int = 0;
+const O_DIRECTORY: c_int = 0x0002_0000;
+const O_CLOEXEC: c_int = 0x0010_0000;
+
+pub struct Dir {
+    fd: c_int,
+    buf: *mut u8,
+    cap: usize,
+    len: usize,
+    pos: usize,
+    base: i64,
+    ent: Dirent12,
+}
+
+extern "C" {
+    fn open(path: *const c_char, flags: c_int, ...) -> c_int;
+    fn getdirentries(fd: c_int, buf: *mut c_char, nbytes: usize, basep: *mut i64) -> isize;
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn fdopendir(fd: c_int) -> *mut Dir {
+    let mut st: Stat11 = core::mem::zeroed();
+    if syscall6(SYS_FSTAT11, [fd as u64, &mut st as *mut Stat11 as u64, 0, 0, 0, 0]) != 0 {
+        return core::ptr::null_mut();
+    }
+    let cap = (st.blksize.max(0) as usize).clamp(DIRBUF_MIN, DIRBUF_MAX);
+
+    let d = malloc(core::mem::size_of::<Dir>()) as *mut Dir;
+    let buf = malloc(cap) as *mut u8;
+    if d.is_null() || buf.is_null() {
+        free(d.cast());
+        free(buf.cast());
+        *__error() = 12; // ENOMEM
+        return core::ptr::null_mut();
+    }
+    (*d).fd = fd;
+    (*d).buf = buf;
+    (*d).cap = cap;
+    (*d).len = 0;
+    (*d).pos = 0;
+    (*d).base = 0;
+    sys_fcntl(fd, F_SETFD, FD_CLOEXEC as usize);
+    d
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn opendir(path: *const c_char) -> *mut Dir {
+    let fd = open(path, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    if fd < 0 {
+        return core::ptr::null_mut();
+    }
+    let d = fdopendir(fd);
+    if d.is_null() {
+        close(fd);
+    }
+    d
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn readdir(d: *mut Dir) -> *mut Dirent12 {
+    let d = &mut *d;
+    loop {
+        if d.pos >= d.len {
+            let n = getdirentries(d.fd, d.buf.cast(), d.cap, &mut d.base);
+            if n <= 0 {
+                return core::ptr::null_mut(); // end (errno untouched) or error
+            }
+            d.len = (n as usize).min(d.cap);
+            d.pos = 0;
+        }
+        let hsize = core::mem::size_of::<Dirent11Head>();
+        if d.pos + hsize > d.len {
+            d.pos = d.len; // truncated record: read the next block
+            continue;
+        }
+        let head = &*(d.buf.add(d.pos) as *const Dirent11Head);
+        let reclen = head.reclen as usize;
+        if reclen < hsize || d.pos + reclen > d.len {
+            d.pos = d.len; // corrupt record: read the next block
+            continue;
+        }
+        let name = d.buf.add(d.pos + hsize);
+        d.pos += reclen;
+        if head.fileno == 0 {
+            continue; // deleted entry
+        }
+        // The name must fit inside its record.
+        let n = (head.namlen as usize).min(255).min(reclen - hsize);
+        d.ent.fileno = head.fileno as u64;
+        d.ent.off = 0;
+        d.ent.reclen = core::mem::size_of::<Dirent12>() as u16;
+        d.ent.kind = head.kind;
+        d.ent.namlen = n as u16;
+        core::ptr::copy_nonoverlapping(name, d.ent.name.as_mut_ptr().cast(), n);
+        d.ent.name[n] = 0;
+        return &mut d.ent;
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn closedir(d: *mut Dir) -> c_int {
+    let r = close((*d).fd);
+    free((*d).buf.cast());
+    free(d.cast());
+    r
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn dirfd(d: *mut Dir) -> c_int {
+    (*d).fd
 }
