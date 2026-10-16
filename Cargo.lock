@@ -81,6 +81,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "http_test"
+version = "0.1.0"
+dependencies = [
+ "ps5",
+]
+
+[[package]]
 name = "hwinfo"
 version = "0.1.0"
 dependencies = [

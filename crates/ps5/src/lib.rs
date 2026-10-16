@@ -5,6 +5,8 @@
 #![no_std]
 
 mod buf;
+pub mod fmt;
+pub mod http;
 pub mod app;
 pub mod klog;
 pub mod notify;
