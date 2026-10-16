@@ -3,6 +3,7 @@ name = "ps5"
 description = "Safe, allocation-free wrappers over the PS5 payload SDK"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 
 [dependencies]
 ps5-sys.workspace = true

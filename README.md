@@ -146,5 +146,10 @@ include, and won't help with, anything for running pirated games.
 - **Aleksei Kulaev**: contributor to the SDK's linker wrapper.
 - The ps5-payload-dev community.
 
-The PS5 Payload SDK is licensed under GPLv3. Payloads built with it link against its
-libraries.
+## License
+
+GPL-3.0-or-later, the same license as the PS5 Payload SDK. See [LICENSE](LICENSE).
+
+This isn't optional. The bindings are generated from the SDK's GPLv3 headers, and every
+payload ELF statically links the SDK's GPLv3 startup and kernel code. If you distribute a
+payload built with this library, its source must be available under the GPL too.
