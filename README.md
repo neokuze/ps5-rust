@@ -2,6 +2,8 @@
 
 Write PS5 homebrew payloads in Rust. `no_std`, no heap, small ELFs.
 
+*Unofficial community project, not affiliated with Sony. See [Legal](#legal).*
+
 This project is a Rust layer **on top of the [PS5 Payload SDK](https://github.com/ps5-payload-dev/sdk)
 by John Törnblom**. The SDK does the hard part: the toolchain wrappers, startup code, linker
 script, libc and Sony library stubs. All we add is Rust bindings, safe wrappers and a target
@@ -155,8 +157,17 @@ cargo build --release   # -> target/x86_64-sie-ps5/release/<name>
 
 ## Legal
 
+**This project is not affiliated with, endorsed by, or sponsored by Sony Interactive
+Entertainment.** "PlayStation" and "PS5" are trademarks of Sony Interactive Entertainment
+Inc., used here only to say which hardware the code runs on.
+
+It contains no Sony code, SDK, firmware or keys. The bindings are generated from the
+open-source PS5 Payload SDK's headers, and the Sony system functions are only declared
+(name and signature) so payloads can call what's already on the console.
+
 This is for homebrew and for running your own software on hardware you own. It doesn't
-include, and won't help with, anything for running pirated games.
+include, and won't help with, anything for running pirated games. Use it at your own risk:
+the software comes with no warranty (see the license).
 
 ## Credits
 
