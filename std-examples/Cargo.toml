@@ -1,0 +1,16 @@
+# Payloads that use Rust's std (and so crates like tokio). Separate from the
+# root workspace because they build with another target and build-std set.
+[workspace]
+resolver = "2"
+members = ["hello_std", "tokio_server", "kq_probe"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+
+[profile.release]
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+panic = "abort"

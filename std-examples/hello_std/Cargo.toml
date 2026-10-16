@@ -1,0 +1,10 @@
+[package]
+name = "hello_std"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+ps5-std-rt = { path = "../../crates/ps5-std-rt" }
+ps5 = { path = "../../crates/ps5", features = ["notify"] }

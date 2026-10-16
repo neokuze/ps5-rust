@@ -1,0 +1,15 @@
+[build]
+target = "../targets/x86_64-sie-ps5-std.json"
+
+[target.x86_64-sie-ps5-std]
+linker = "/opt/ps5-payload-sdk/bin/prospero-clang"
+# - No -Cpanic=immediate-abort (this overrides the parent's build.rustflags):
+#   panics run the panic hook, so payloads can show the message in a toast.
+# - mio wakes tokio through a pipe instead of kqueue EVFILT_USER. EVFILT_USER
+#   also works through ps5-std-rt's kevent, but the pipe is what was tested
+#   on the console.
+rustflags = ["-Zunstable-options", "--cfg", "mio_unsupported_force_waker_pipe"]
+
+[unstable]
+build-std = ["std", "panic_abort"]
+json-target-spec = true

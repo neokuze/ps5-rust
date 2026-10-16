@@ -1,0 +1,11 @@
+[package]
+name = "tokio_server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+ps5 = { path = "../../crates/ps5", features = ["notify"] }
+ps5-std-rt = { path = "../../crates/ps5-std-rt" }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "time", "macros", "sync"] }

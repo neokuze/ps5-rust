@@ -1,5 +1,6 @@
 [workspace]
 resolver = "2"
+exclude = ["std-examples"] # own workspace: std target
 members = [
     "crates/ps5-sys",
     "crates/ps5",
