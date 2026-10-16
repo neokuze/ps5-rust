@@ -5,6 +5,25 @@ fn main() {
     println!("cargo:rerun-if-env-changed=PS5_PAYLOAD_SDK");
     println!("cargo:rerun-if-changed=include");
 
+    // feature -> Sony libs it needs (libkernel_web, libSceLibcInternal and
+    // libSceNet are always linked by prospero-clang).
+    for (feature, libs) in [
+        ("KERNEL_SYS", &["kernel_sys"][..]),
+        ("NOTIFICATION", &["SceNotification"]),
+        ("RANDOM", &["SceRandom"]),
+        ("USER_SERVICE", &["SceUserService"]),
+        ("SYSTEM_SERVICE", &["SceSystemService"]),
+        ("APP_INST_UTIL", &["SceIpmi", "SceAppInstUtil"]),
+        ("SSL", &["SceSsl"]),
+        ("HTTP2", &["SceHttp2"]),
+    ] {
+        if env::var_os(format!("CARGO_FEATURE_{feature}")).is_some() {
+            for lib in libs {
+                println!("cargo:rustc-link-lib=dylib={lib}");
+            }
+        }
+    }
+
     let bindings = bindgen::Builder::default()
         .header("include/wrapper.h")
         .clang_args([

@@ -1,31 +1,26 @@
+# Thin wrapper over cargo: builds an example and copies it to build/<name>.elf.
+#   make                         build all examples
+#   make EXAMPLE=hwinfo test     build + send to the PS5 loader
 PS5_PAYLOAD_SDK ?= /opt/ps5-payload-sdk
 PS5_HOST ?= ps5
 PS5_PORT ?= 9021
+EXAMPLES := hello_notify hwinfo http_test
+EXAMPLE  ?= hello_notify
 export PS5_PAYLOAD_SDK
 
-# Payload to build/deploy: make PAYLOAD=hello_notify
-PAYLOAD ?= hello_notify
-# Sony libs beyond the SDK defaults, one line in payloads/<name>/sce_libs
-# (each ps5 module's doc comment says which it needs).
-SCE_LIBS ?= $(shell cat payloads/$(PAYLOAD)/sce_libs 2>/dev/null)
+OUT := target/x86_64-sie-ps5/release
 
-ELF := $(PAYLOAD).elf
-LIB := target/x86_64-unknown-linux-gnu/release/lib$(PAYLOAD).a
+all:
+	cargo build --release $(addprefix -p ,$(EXAMPLES))
+	@mkdir -p build
+	@for e in $(EXAMPLES); do \
+	  $(PS5_PAYLOAD_SDK)/bin/prospero-strip -o build/$$e.elf $(OUT)/$$e && echo "build/$$e.elf"; \
+	done
 
-all: $(ELF)
-
-$(LIB): FORCE
-	cargo build --release -p $(PAYLOAD)
-
-$(ELF): $(LIB)
-	$(PS5_PAYLOAD_SDK)/bin/prospero-clang -o $@ $< $(SCE_LIBS)
-	$(PS5_PAYLOAD_SDK)/bin/prospero-strip $@
-
-test: $(ELF)
-	$(PS5_PAYLOAD_SDK)/bin/prospero-deploy -h $(PS5_HOST) -p $(PS5_PORT) $<
+test: all
+	$(PS5_PAYLOAD_SDK)/bin/prospero-deploy -h $(PS5_HOST) -p $(PS5_PORT) build/$(EXAMPLE).elf
 
 clean:
-	cargo clean; rm -f *.elf
+	cargo clean; rm -rf build
 
-FORCE:
-.PHONY: all test clean FORCE
+.PHONY: all test clean

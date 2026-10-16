@@ -1,2 +1,4 @@
 target/
+build/
 *.elf
+__pycache__/

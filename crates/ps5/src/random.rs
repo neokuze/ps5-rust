@@ -1,4 +1,4 @@
-//! Hardware RNG. Link with `-lSceRandom`.
+//! Hardware RNG. Feature `random`.
 
 use crate::{check, Result};
 

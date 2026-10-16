@@ -2,9 +2,7 @@
 name = "hwinfo"
 version.workspace = true
 edition.workspace = true
-
-[lib]
-crate-type = ["staticlib"]
+publish = false
 
 [dependencies]
-ps5.workspace = true
+ps5 = { workspace = true, features = ["notify","hw"] }

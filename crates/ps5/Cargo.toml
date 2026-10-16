@@ -1,8 +1,20 @@
 [package]
 name = "ps5"
-description = "Safe wrappers over ps5-sys"
+description = "Safe, allocation-free wrappers over the PS5 payload SDK"
 version.workspace = true
 edition.workspace = true
 
 [dependencies]
 ps5-sys.workspace = true
+
+# Enable only what a payload uses: each module links its Sony libraries.
+# Core (fmt, klog, payload, fw_version) needs no feature.
+[features]
+default = []
+full = ["notify", "hw", "random", "app", "system", "http"]
+notify = ["ps5-sys/notification"]
+hw = ["ps5-sys/kernel-sys"]
+random = ["ps5-sys/random"]
+app = ["ps5-sys/app-inst-util", "system"]
+system = ["ps5-sys/user-service", "ps5-sys/system-service"]
+http = ["ps5-sys/ssl", "ps5-sys/http2"]

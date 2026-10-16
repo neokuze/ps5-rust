@@ -1,5 +1,4 @@
-//! HTTP(S) client over libSceHttp2. Link with `-lSceSsl -lSceHttp2`
-//! (libSceNet is linked by default).
+//! HTTP(S) client over libSceHttp2. Feature `http`.
 //!
 //! ```ignore
 //! let http = Http::init("my-payload/1.0")?;

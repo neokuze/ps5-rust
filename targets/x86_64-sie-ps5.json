@@ -1,0 +1,32 @@
+{
+  "arch": "x86_64",
+  "cpu": "znver2",
+  "data-layout": "e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128",
+  "llvm-target": "x86_64-unknown-freebsd",
+  "os": "ps5",
+  "vendor": "sie",
+  "target-family": ["unix"],
+  "target-pointer-width": 64,
+  "max-atomic-width": 64,
+  "metadata": {
+    "description": "PS5 payloads (FreeBSD-based, SysV ABI), linked by the ps5-payload-sdk",
+    "std": false,
+    "host_tools": false
+  },
+  "linker-flavor": "gnu-cc",
+  "linker": "prospero-clang",
+  "executables": true,
+  "dynamic-linking": false,
+  "position-independent-executables": true,
+  "static-position-independent-executables": true,
+  "relocation-model": "pic",
+  "plt-by-default": false,
+  "relro-level": "partial",
+  "post-link-args": { "gnu-cc": ["-Wl,--no-as-needed"] },
+  "no-default-libraries": false,
+  "crt-objects-fallback": "false",
+  "has-thread-local": false,
+  "panic-strategy": "abort",
+  "stack-probes": { "kind": "inline" },
+  "default-dwarf-version": 4
+}

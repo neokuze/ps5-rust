@@ -1,4 +1,4 @@
-//! User/system services. Link with `-lSceUserService -lSceSystemService`.
+//! User/system services. Feature `system`.
 
 use crate::{buf::Buf, check, Result};
 

@@ -1,6 +1,12 @@
 [workspace]
 resolver = "2"
-members = ["crates/ps5-sys", "crates/ps5", "payloads/*"]
+members = [
+    "crates/ps5-sys",
+    "crates/ps5",
+    "examples/hello_notify",
+    "examples/hwinfo",
+    "examples/http_test",
+]
 
 [workspace.package]
 version = "0.1.0"

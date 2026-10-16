@@ -1,5 +1,4 @@
-//! Running-app info (default libs) and app install
-//! (`-lSceIpmi -lSceAppInstUtil -lSceUserService -lSceSystemService`).
+//! Running-app info and app install. Feature `app`.
 
 use crate::{buf::Buf, check, CString, Result};
 

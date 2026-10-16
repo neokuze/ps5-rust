@@ -1,21 +1,24 @@
 //! Safe, allocation-free wrappers over the PS5 payload SDK.
 //!
 //! Anything not wrapped here is still reachable, unsafely, via [`sys`].
-//! Each module notes the `-l` flag its functions need at link time.
+//! Modules behind Cargo features (`notify`, `hw`, `http`, ...) link the
+//! Sony libraries they need; `full` enables all of them.
 #![no_std]
 
 mod buf;
 pub mod fmt;
-pub mod http;
-pub mod app;
 pub mod klog;
-pub mod notify;
 pub mod payload;
-pub mod random;
-pub mod system;
-pub mod hw;
+
+#[cfg(feature = "app")] pub mod app;
+#[cfg(feature = "http")] pub mod http;
+#[cfg(feature = "hw")] pub mod hw;
+#[cfg(feature = "notify")] pub mod notify;
+#[cfg(feature = "random")] pub mod random;
+#[cfg(feature = "system")] pub mod system;
 
 pub use buf::CString;
+#[cfg(feature = "notify")]
 pub use notify::{notify, Toast};
 /// The raw bindings, for everything without a safe wrapper.
 pub use ps5_sys as sys;

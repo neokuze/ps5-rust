@@ -1,6 +1,15 @@
+# Builds for the PS5 by default. `cargo build --release -p hwinfo` writes
+# target/x86_64-sie-ps5/release/hwinfo, a ready-to-send payload ELF.
 [build]
-target = "x86_64-unknown-linux-gnu"
-rustflags = ["-C", "relocation-model=pic", "-C", "target-cpu=znver2", "-Zunstable-options", "-Cpanic=immediate-abort"]
+target = "targets/x86_64-sie-ps5.json"
+rustflags = ["-Zunstable-options", "-Cpanic=immediate-abort"]
+
+[target.x86_64-sie-ps5]
+# prospero-clang adds crt1.o, the SDK linker script, PIE and the default
+# Sony libs. Override with CARGO_TARGET_X86_64_SIE_PS5_LINKER if your SDK
+# lives elsewhere.
+linker = "/opt/ps5-payload-sdk/bin/prospero-clang"
 
 [unstable]
-build-std = ["core"]
+build-std = ["core", "compiler_builtins"]
+json-target-spec = true

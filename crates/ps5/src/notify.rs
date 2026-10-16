@@ -1,4 +1,4 @@
-//! System toasts via `sceNotificationSend`. Link with `-lSceNotification`.
+//! System toasts via `sceNotificationSend`. Feature `notify`.
 
 use crate::{buf::Buf, check, Result};
 use ps5_sys::{sceNotificationSend, SCE_NOTIFICATION_LOCAL_USER_ID_SYSTEM};

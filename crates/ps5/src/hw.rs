@@ -1,4 +1,4 @@
-//! Hardware info and sensors. Link with `-lkernel_sys`.
+//! Hardware info and sensors. Feature `hw`.
 
 use crate::{check, CString, Result};
 

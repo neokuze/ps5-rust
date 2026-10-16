@@ -1,4 +1,5 @@
 #![no_std]
+#![no_main]
 
 use ps5::{hw, klog, Toast};
 
