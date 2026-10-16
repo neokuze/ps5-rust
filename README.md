@@ -7,7 +7,8 @@ by John Törnblom**. The SDK does the hard part: the toolchain wrappers, startup
 script, libc and Sony library stubs. All we add is Rust bindings, safe wrappers and a target
 definition. You need the SDK installed to build anything here.
 
-Tested on a PS5 **CFI-1215A, firmware 13.60**: `hello_notify`, `hwinfo` and `http_test` all run.
+Tested on a PS5 **CFI-1215A, firmware 13.60**: `hello_notify`, `hwinfo`, `http_test` and
+`http_server` all run.
 
 ## What's inside
 
@@ -17,15 +18,16 @@ crates/ps5/            safe wrappers (no heap, no core::fmt)
 targets/               x86_64-sie-ps5.json - the Rust target for PS5 payloads
 examples/hello_notify  shows a system toast
 examples/hwinfo        model + CPU temperature in a toast and klog
-examples/http_test     GET/POST to a server on your PC
-examples/pc/           the PC-side test server (Python, stdlib only)
+examples/http_test     PS5 as client: GET/POST to a server on your PC
+examples/http_server   PS5 as server: the PC asks for info or sends toasts
+examples/pc/           PC side: test_server.py, ps5_client.py (+ .cmd launchers)
 ```
 
 `ps5` modules (each one behind a Cargo feature that links the Sony libraries it needs):
 
 | Feature   | Module          | Gives you                                         |
 |-----------|-----------------|---------------------------------------------------|
-| *(none)*  | `fmt`, `klog`, `payload` | `log!`/`print!`/`line!`, kernel log, payload args/exit, `fw_version()` |
+| *(none)*  | `fmt`, `klog`, `net`, `payload` | `log!`/`print!`/`line!`, kernel log, TCP sockets, payload args/exit, `fw_version()` |
 | `notify`  | `notify`        | `Toast` (JSON toast), `simple()` popup            |
 | `hw`      | `hw`            | model, serial, CPU frequency/temperature, SoC temp |
 | `random`  | `random`        | hardware RNG                                      |
@@ -75,7 +77,21 @@ PS5_TEST_SERVER=http://<pc-ip>:8080 make test EXAMPLE=http_test PS5_HOST=<ps5-ip
 ```
 
 The PS5 shows the PC's greeting in a toast. The PC prints a report with the console's
-model, CPU temperature and firmware.
+model, CPU temperature and firmware. The server's IP is fixed at build time, so rebuild if
+your PC's address changes.
+
+For `http_server` it's the other way round: the PS5 listens on port **9954** and the PC is
+the client. Send the payload, wait for the "http_server running" toast, then:
+
+```bash
+python examples/pc/ps5_client.py   # asks for the PS5's IP, then a menu
+curl http://<ps5-ip>:9954/info
+curl "http://<ps5-ip>:9954/notify?msg=hello"
+curl http://<ps5-ip>:9954/quit      # stops the server
+```
+
+On Windows, double-click `examples/pc/start_test_server.cmd` or
+`examples/pc/start_client_ps5.cmd` to launch them.
 
 ## Use it in your own payload
 
@@ -130,6 +146,11 @@ cargo build --release   # -> target/x86_64-sie-ps5/release/<name>
   declared in `crates/ps5-sys/include/sce_extra.h`, with signatures copied from the SDK
   samples. The struct layouts there (`app_info_t`, `notify_request_t`) also come from the
   samples and haven't been checked against firmware.
+- The SDK's linker script keeps code and data on separate pages only through the
+  page-aligned `.eh_frame_hdr` section. That's why the target sets `default-uwtable`:
+  without unwind tables the data shares a page with code, and the payload crashes when it
+  reaches `main`. The target also uses full relro, because that's the only way rustc emits
+  GOT calls (`GLOB_DAT`) instead of PLT ones, matching the SDK's `-fno-plt`.
 - `app::install_title_dir` changes the console. Back up first.
 
 ## Legal

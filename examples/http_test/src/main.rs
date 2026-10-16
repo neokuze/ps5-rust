@@ -16,8 +16,10 @@ pub extern "C" fn main() -> i32 {
     match run() {
         Ok(()) => 0,
         Err(e) => {
-            log!("http_test failed: ", e.0, " (", Hex(e.0 as u32 as u64), ")");
-            let _ = Toast::new("http_test failed").sub(ps5::line!("error ", Hex(e.0 as u32 as u64)).as_str()).send();
+            let step = ps5::http::last_step();
+            log!("http_test failed in ", step, ": ", e.0, " (", Hex(e.0 as u32 as u64), ")");
+            let detail = ps5::line!(step, " -> ", Hex(e.0 as u32 as u64));
+            let _ = Toast::new("http_test failed").sub(detail.as_str()).send();
             e.0
         }
     }

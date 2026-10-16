@@ -8,6 +8,7 @@
 mod buf;
 pub mod fmt;
 pub mod klog;
+pub mod net;
 pub mod payload;
 
 #[cfg(feature = "app")] pub mod app;

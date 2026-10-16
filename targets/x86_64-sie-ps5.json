@@ -21,12 +21,13 @@
   "static-position-independent-executables": true,
   "relocation-model": "pic",
   "plt-by-default": false,
-  "relro-level": "partial",
+  "relro-level": "full",
   "post-link-args": { "gnu-cc": ["-Wl,--no-as-needed"] },
   "no-default-libraries": false,
   "crt-objects-fallback": "false",
   "has-thread-local": false,
   "panic-strategy": "abort",
+  "default-uwtable": true,
   "stack-probes": { "kind": "inline" },
   "default-dwarf-version": 4
 }

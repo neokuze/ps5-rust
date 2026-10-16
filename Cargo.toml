@@ -6,6 +6,7 @@ members = [
     "examples/hello_notify",
     "examples/hwinfo",
     "examples/http_test",
+    "examples/http_server",
 ]
 
 [workspace.package]

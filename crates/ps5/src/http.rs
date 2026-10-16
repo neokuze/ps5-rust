@@ -16,6 +16,24 @@ const NET_POOL: i32 = 32 * 1024;
 const SSL_POOL: usize = 256 * 1024;
 const HTTP_POOL: usize = 256 * 1024;
 
+/// SDK calls in the order `Http` makes them; [`last_step`] names the most
+/// recent one, so a failure can be traced to the call that returned it.
+const STEPS: [&str; 9] = [
+    "sceNetInit", "sceNetPoolCreate", "sceSslInit", "sceHttp2Init",
+    "sceHttp2CreateTemplate", "sceHttp2CreateRequestWithURL",
+    "sceHttp2SendRequest", "sceHttp2GetStatusCode", "sceHttp2ReadData",
+];
+static STEP: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(0);
+
+fn step(i: usize) {
+    STEP.store(i, core::sync::atomic::Ordering::Relaxed);
+}
+
+/// The SDK call `Http` made most recently; after an error, the one that failed.
+pub fn last_step() -> &'static str {
+    STEPS[STEP.load(core::sync::atomic::Ordering::Relaxed)]
+}
+
 /// Turns the SDK's "negative = error, else id" convention into a Result.
 fn id(code: i32) -> Result<i32> {
     if code < 0 { Err(Error(code)) } else { Ok(code) }
@@ -36,10 +54,15 @@ impl Http {
         // Fill in one handle at a time so Drop only frees what exists.
         let mut h = Http { net: -1, ssl: -1, ctx: -1, tmpl: -1 };
         unsafe {
+            step(0);
             check(sys::sceNetInit())?;
+            step(1);
             h.net = id(sys::sceNetPoolCreate(c"ps5-rs-http".as_ptr(), NET_POOL, 0))?;
+            step(2);
             h.ssl = id(sys::sceSslInit(SSL_POOL))?;
+            step(3);
             h.ctx = id(sys::sceHttp2Init(h.net, h.ssl, HTTP_POOL, 1))?;
+            step(4);
             h.tmpl = id(sys::sceHttp2CreateTemplate(h.ctx, agent.as_ptr(), 3, 1))?;
         }
         Ok(h)
@@ -57,6 +80,7 @@ impl Http {
     pub fn request(&self, method: &str, url: &str, body: &[u8]) -> Result<Response<'_>> {
         let method = Buf::<16>::from_str(method);
         let url = Buf::<2048>::from_str(url);
+        step(5);
         let req = id(unsafe {
             sys::sceHttp2CreateRequestWithURL(self.tmpl, method.as_ptr(), url.as_ptr(), body.len() as u64)
         })?;
@@ -64,7 +88,9 @@ impl Http {
 
         let body_ptr = if body.is_empty() { core::ptr::null() } else { body.as_ptr().cast() };
         unsafe {
+            step(6);
             check(sys::sceHttp2SendRequest(req, body_ptr, body.len()))?;
+            step(7);
             check(sys::sceHttp2GetStatusCode(req, &mut res.status))?;
         }
         Ok(res)
@@ -96,6 +122,7 @@ impl Response<'_> {
 
     /// Reads the next chunk of the body; `Ok(0)` means the end.
     pub fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
+        step(8);
         let n = unsafe { sys::sceHttp2ReadData(self.req, buf.as_mut_ptr().cast(), buf.len()) };
         id(n).map(|n| n as usize)
     }

@@ -1,0 +1,9 @@
+[package]
+name = "http_server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+ps5 = { workspace = true, features = ["notify", "hw"] }
