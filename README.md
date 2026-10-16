@@ -78,7 +78,7 @@ FreeBSD 11 with some gaps, and Rust assumes FreeBSD 12, so payloads also depend 
 | `accept4`, `pthread_setname_np`, `dl_iterate_phdr` missing | implements them |
 | `struct kevent` is the 32-byte FreeBSD 11 layout; libc uses the 64-byte 12 one | `kevent` converts and calls the syscall |
 | `fcntl(F_DUPFD_CLOEXEC)` fails with `EOPNOTSUPP` (breaks `try_clone` and tokio) | emulates it with `F_DUPFD` + `F_SETFD` |
-| `struct stat` is the 120-byte FreeBSD 11 one; libc uses the 224-byte 12 one | `stat`/`lstat`/`fstat` call the FreeBSD 11 syscalls and widen the result |
+| `struct stat` is the 120-byte FreeBSD 11 one; libc uses the 224-byte 12 one | `stat`/`lstat`/`fstat`/`fstatat` call the FreeBSD 11 syscalls and widen the result |
 | `getrandom()` doesn't exist (FreeBSD 12+); the getrandom crate (ring, rustls) needs it | implements it over `arc4random_buf` |
 | `struct dirent` has a 32-bit `d_fileno` and no `d_off` | own `opendir`/`readdir`/`closedir`/`fdopendir`/`dirfd` over `getdirentries`, widening each entry (buffer sized from `st_blksize`: 64 KB on `/data`) |
 
@@ -106,9 +106,22 @@ SDK's compiler: `std-examples/.cargo/config.toml` sets `CC_x86_64-sie-ps5-std` a
 host's gcc.
 
 `std::fs` works (read/write, metadata, `read_dir`, copy, rename, `canonicalize`,
-`remove_dir_all`, checked by `fs_probe`). One gap: `fstatat` isn't converted, because the
-SDK's `libc.a` defines it next to syscalls std needs. std doesn't call it on FreeBSD, but a
-crate that does would get the FreeBSD 11 layout.
+`remove_dir_all`, checked by `fs_probe`), and so do the libc calls crates reach directly:
+`fstatat`, `mkstemp`/`mkdtemp`, `scandir`/`alphasort`.
+
+Some of that needs a patched libc. The SDK's `libc.a` defines `fstatat` itself (a second
+definition would clash) and contains code compiled for the FreeBSD 11 layouts (`mktemp`,
+`scandir`, `fts`). So `ps5-std-rt`'s build script makes a copy of the installed SDK's `libc.a`
+with `llvm-objcopy` (no SDK binaries are stored in this repo) and bundles it into its rlib,
+which the linker reads before the SDK's own:
+
+- the SDK's `fstatat` is renamed out of the way, and `ps5-std-rt` provides a FreeBSD 12 one;
+- `mktemp`'s calls to `stat`/`lstat` go to FreeBSD 11 versions, matching how it was built;
+- `scandir`/`alphasort` are reimplemented; `fts_*` are stubs that fail with `ENOSYS`, so the
+  SDK's fts, which would hand FreeBSD 11 structs to Rust, never gets linked.
+
+For this the std target sets `no-default-libraries` and lists the Sony libraries itself in
+`late-link-args`: `prospero-clang` would otherwise put the SDK's `-lc` ahead of everything.
 
 ## Requirements
 

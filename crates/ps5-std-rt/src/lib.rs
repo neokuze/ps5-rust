@@ -12,8 +12,12 @@
 //! - `accept4`, `pthread_setname_np`, `dl_iterate_phdr`, missing from the SDK;
 //! - `kevent`, converting FreeBSD 12 `struct kevent` to the 11 layout;
 //! - `fcntl`, emulating `F_DUPFD_CLOEXEC` (rejected by the PS5 kernel);
-//! - `stat`/`lstat`/`fstat` and the `DIR` API, converting FreeBSD 11
-//!   `struct stat` / `struct dirent` to the 12 layouts.
+//! - `stat`/`lstat`/`fstat`/`fstatat`, `scandir` and the `DIR` API,
+//!   converting FreeBSD 11 `struct stat` / `struct dirent` to the 12 layouts;
+//! - a patched copy of the SDK libc.a (see build.rs) so its own code that
+//!   uses the 11 layouts keeps them, and `fts_*` stubs that keep the SDK's
+//!   fts (which would hand FreeBSD 11 structs to Rust) out of the link.
+//! - `getrandom` (FreeBSD 12+), over `arc4random_buf`.
 use core::ffi::{c_char, c_int, c_void};
 
 const F_SETFD: c_int = 2;
@@ -93,6 +97,7 @@ const SYS_KEVENT: u64 = 363;
 extern "C" {
     fn malloc(n: usize) -> *mut c_void;
     fn free(p: *mut c_void);
+    fn realloc(p: *mut c_void, n: usize) -> *mut c_void;
     fn __error() -> *mut c_int;
 }
 
@@ -324,9 +329,28 @@ pub unsafe extern "C" fn fstat(fd: c_int, buf: *mut Stat12) -> c_int {
     stat_call(SYS_FSTAT11, [fd as u64, 0, 0, 0, 0, 0], 1, buf)
 }
 
-// fstatat is not wrapped: the SDK's libc.a defines it in the same object as
-// syscalls std needs, so a second definition clashes. std doesn't call it on
-// FreeBSD; crates that do still get the FreeBSD 11 layout.
+// fstatat: build.rs renames the SDK's to __sdk_fstatat in the bundled libc
+// copy so this name is free. We don't call __sdk_fstatat: it's a bare
+// `syscall` stub that returns errno as a positive value on failure instead
+// of -1 + errno, so this goes through syscall6, which checks the carry flag.
+const SYS_FSTATAT11: u64 = 493;
+
+#[no_mangle]
+pub unsafe extern "C" fn fstatat(fd: c_int, path: *const c_char, buf: *mut Stat12, flag: c_int) -> c_int {
+    stat_call(SYS_FSTATAT11, [fd as u64, path as u64, 0, flag as u64, 0, 0], 2, buf)
+}
+
+// The SDK's own mktemp.o was compiled for the FreeBSD 11 `struct stat`;
+// build.rs points its stat/lstat calls here instead of at the wrappers above.
+#[no_mangle]
+unsafe extern "C" fn __ps5_stat11(path: *const c_char, buf: *mut c_void) -> c_int {
+    syscall6(SYS_STAT11, [path as u64, buf as u64, 0, 0, 0, 0]) as c_int
+}
+
+#[no_mangle]
+unsafe extern "C" fn __ps5_lstat11(path: *const c_char, buf: *mut c_void) -> c_int {
+    syscall6(SYS_LSTAT11, [path as u64, buf as u64, 0, 0, 0, 0]) as c_int
+}
 
 // ---------------------------------------------------------------------------
 // Directories: the console's readdir returns FreeBSD 11 `struct dirent`
@@ -489,3 +513,127 @@ pub unsafe extern "C" fn getrandom(buf: *mut c_void, len: usize, _flags: u32) ->
     arc4random_buf(buf, len);
     len as isize
 }
+
+// ---------------------------------------------------------------------------
+// scandir/alphasort: the SDK's scandir.o builds FreeBSD 11 dirents and hands
+// them to the caller, who reads them as FreeBSD 12. Defining them here keeps
+// that object out of the link; this version sits on the readdir above.
+
+extern "C" {
+    fn qsort(base: *mut c_void, n: usize, size: usize, cmp: unsafe extern "C" fn(*const c_void, *const c_void) -> c_int);
+    fn strcoll(a: *const c_char, b: *const c_char) -> c_int;
+}
+
+type DirentCmp = unsafe extern "C" fn(*const c_void, *const c_void) -> c_int;
+
+#[no_mangle]
+pub unsafe extern "C" fn scandir(
+    path: *const c_char,
+    namelist: *mut *mut *mut Dirent12,
+    select: Option<unsafe extern "C" fn(*const Dirent12) -> c_int>,
+    compar: Option<DirentCmp>,
+) -> c_int {
+    let d = opendir(path);
+    if d.is_null() {
+        return -1;
+    }
+    let mut list: *mut *mut Dirent12 = core::ptr::null_mut();
+    let mut len = 0usize;
+    let mut cap = 0usize;
+    let fail = |list: *mut *mut Dirent12, len: usize, d: *mut Dir| {
+        for i in 0..len {
+            free((*list.add(i)).cast());
+        }
+        free(list.cast());
+        closedir(d);
+        *__error() = 12; // ENOMEM
+        -1
+    };
+    loop {
+        let e = readdir(d);
+        if e.is_null() {
+            break;
+        }
+        if let Some(sel) = select {
+            if sel(e) == 0 {
+                continue;
+            }
+        }
+        if len == cap {
+            cap = if cap == 0 { 32 } else { cap * 2 };
+            let grown = realloc(list.cast(), cap * core::mem::size_of::<*mut Dirent12>()) as *mut *mut Dirent12;
+            if grown.is_null() {
+                return fail(list, len, d);
+            }
+            list = grown;
+        }
+        let copy = malloc(core::mem::size_of::<Dirent12>()) as *mut Dirent12;
+        if copy.is_null() {
+            return fail(list, len, d);
+        }
+        *copy = *e;
+        *list.add(len) = copy;
+        len += 1;
+    }
+    closedir(d);
+    if let (Some(cmp), true) = (compar, len > 1) {
+        qsort(list.cast(), len, core::mem::size_of::<*mut Dirent12>(), cmp);
+    }
+    *namelist = list;
+    len as c_int
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn alphasort(a: *const c_void, b: *const c_void) -> c_int {
+    let a = *(a as *const *const Dirent12);
+    let b = *(b as *const *const Dirent12);
+    strcoll((*a).name.as_ptr(), (*b).name.as_ptr())
+}
+
+// ---------------------------------------------------------------------------
+// fts: the SDK's fts.o returns FreeBSD 11 `struct stat`/dirent data inside
+// FTSENT, which Rust code would misread. It's large and rarely used (std
+// doesn't), so these stand-ins keep it out of the link and fail cleanly
+// with ENOSYS instead of corrupting memory.
+
+const ENOSYS: c_int = 78;
+
+unsafe fn enosys() {
+    *__error() = ENOSYS;
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn fts_open(_: *const c_void, _: c_int, _: *const c_void) -> *mut c_void {
+    enosys();
+    core::ptr::null_mut()
+}
+#[no_mangle]
+pub unsafe extern "C" fn fts_read(_: *mut c_void) -> *mut c_void {
+    enosys();
+    core::ptr::null_mut()
+}
+#[no_mangle]
+pub unsafe extern "C" fn fts_children(_: *mut c_void, _: c_int) -> *mut c_void {
+    enosys();
+    core::ptr::null_mut()
+}
+#[no_mangle]
+pub unsafe extern "C" fn fts_close(_: *mut c_void) -> c_int {
+    enosys();
+    -1
+}
+#[no_mangle]
+pub unsafe extern "C" fn fts_set(_: *mut c_void, _: *mut c_void, _: c_int) -> c_int {
+    enosys();
+    -1
+}
+#[no_mangle]
+pub extern "C" fn fts_get_clientptr(_: *mut c_void) -> *mut c_void {
+    core::ptr::null_mut()
+}
+#[no_mangle]
+pub extern "C" fn fts_get_stream(_: *mut c_void) -> *mut c_void {
+    core::ptr::null_mut()
+}
+#[no_mangle]
+pub extern "C" fn fts_set_clientptr(_: *mut c_void, _: *mut c_void) {}
