@@ -84,7 +84,7 @@ In a new crate:
 ```toml
 # Cargo.toml
 [dependencies]
-ps5 = { git = "https://github.com/<you>/ps5-rust", features = ["notify", "hw"] }
+ps5 = { git = "https://github.com/neokuze/ps5-rust", features = ["notify", "hw"] }
 
 [profile.release]
 opt-level = "z"
