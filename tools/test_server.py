@@ -39,4 +39,17 @@ if __name__ == "__main__":
     host = socket.gethostname()
     ips = {i[4][0] for i in socket.getaddrinfo(host, None, socket.AF_INET)}
     print(f"listening on port {PORT}; this PC's addresses: {', '.join(sorted(ips))}")
-    http.server.ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
+    # Own the port exclusively: with the default SO_REUSEADDR, Windows lets a
+    # second copy bind 8080 too, and one of them silently gets no requests.
+    class Server(http.server.ThreadingHTTPServer):
+        allow_reuse_address = False
+
+        def server_bind(self):
+            if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+                self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+            super().server_bind()
+
+    try:
+        Server(("0.0.0.0", PORT), Handler).serve_forever()
+    except OSError as e:
+        sys.exit(f"cannot listen on port {PORT}: {e} (another test_server running?)")
