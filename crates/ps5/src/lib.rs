@@ -1,4 +1,5 @@
-//! Safe, allocation-free wrappers over the PS5 payload SDK.
+//! Safe wrappers over the PS5 payload SDK. Allocation-free unless the
+//! `alloc` feature is on (heap + threads).
 //!
 //! Anything not wrapped here is still reachable, unsafely, via [`sys`].
 //! Modules behind Cargo features (`notify`, `hw`, `http`, ...) link the
@@ -11,6 +12,9 @@ pub mod klog;
 pub mod net;
 pub mod payload;
 
+#[cfg(feature = "alloc")] extern crate alloc;
+#[cfg(feature = "alloc")] pub mod heap;
+#[cfg(feature = "alloc")] pub mod thread;
 #[cfg(feature = "app")] pub mod app;
 #[cfg(feature = "http")] pub mod http;
 #[cfg(feature = "hw")] pub mod hw;

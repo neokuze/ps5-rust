@@ -4,7 +4,7 @@
 PS5_PAYLOAD_SDK ?= /opt/ps5-payload-sdk
 PS5_HOST ?= ps5
 PS5_PORT ?= 9021
-EXAMPLES := hello_notify hwinfo http_test http_server
+EXAMPLES := hello_notify hwinfo http_test http_server threads
 EXAMPLE  ?= hello_notify
 export PS5_PAYLOAD_SDK
 

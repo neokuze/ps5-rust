@@ -1,6 +1,6 @@
 [package]
 name = "ps5"
-description = "Safe, allocation-free wrappers over the PS5 payload SDK"
+description = "Safe wrappers over the PS5 payload SDK"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -12,7 +12,9 @@ ps5-sys.workspace = true
 # Core (fmt, klog, payload, fw_version) needs no feature.
 [features]
 default = []
-full = ["notify", "hw", "random", "app", "system", "http"]
+full = ["alloc", "notify", "hw", "random", "app", "system", "http"]
+# Heap (libc malloc) + pthread threads and Mutex; no extra Sony libs.
+alloc = []
 notify = ["ps5-sys/notification"]
 hw = ["ps5-sys/kernel-sys"]
 random = ["ps5-sys/random"]
