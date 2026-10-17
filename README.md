@@ -35,6 +35,7 @@ std-examples/          std payloads (own workspace, std target):
   https_probe          DNS + HTTPS GET with rustls/ring, verified certs (port 9959)
   err_probe            syscall/std error reporting, writes nothing (port 9960)
   reqwest_probe        reqwest async + blocking over HTTP/HTTPS, redirect, timeout (port 9962)
+  stdout_probe         where fds 0-2 go (the loader socket) and println! redirection (port 10000)
 ```
 
 `ps5` modules (each one behind a Cargo feature that links the Sony libraries it needs):
