@@ -1,0 +1,12 @@
+[package]
+name = "reqwest_probe"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+ps5 = { path = "../../crates/ps5", features = ["notify"] }
+ps5-std-rt = { path = "../../crates/ps5-std-rt" }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-webpki-roots", "blocking"] }
+tokio = { version = "1", features = ["rt", "macros", "time"] }
