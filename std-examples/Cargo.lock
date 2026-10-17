@@ -816,6 +816,38 @@ dependencies = [
 ]
 
 [[package]]
+name = "rest_block"
+version = "0.1.0"
+dependencies = [
+ "ps5",
+ "ps5-std-rt",
+]
+
+[[package]]
+name = "rest_idle"
+version = "0.1.0"
+dependencies = [
+ "ps5",
+ "ps5-std-rt",
+]
+
+[[package]]
+name = "rest_net"
+version = "0.1.0"
+dependencies = [
+ "ps5",
+ "ps5-std-rt",
+]
+
+[[package]]
+name = "rest_probe"
+version = "0.1.0"
+dependencies = [
+ "ps5",
+ "ps5-std-rt",
+]
+
+[[package]]
 name = "ring"
 version = "0.17.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"

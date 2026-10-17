@@ -75,7 +75,7 @@ fn main() {
 // have the expected shape stops the build instead of being guessed.
 
 /// Stubs src/lib.rs defines itself.
-const STUB_SKIP: &[&str] = &["fstatat", "faccessat", "readlinkat"];
+const STUB_SKIP: &[&str] = &["fstatat", "faccessat", "readlinkat", "clock_nanosleep"];
 
 pub fn gen_syscall_stubs(sdk: &std::path::Path, out: &std::path::Path) {
     let status = Command::new(sdk.join("bin/llvm-ar"))

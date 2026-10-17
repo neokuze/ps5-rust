@@ -698,3 +698,57 @@ pub unsafe extern "C" fn readlinkat(fd: c_int, path: *const c_char, buf: *mut c_
     }
     syscall6(SYS_READLINK, [path as u64, buf as u64, size as u64, 0, 0, 0]) as isize
 }
+
+// ---------------------------------------------------------------------------
+// clock_nanosleep: what std::thread::sleep calls on FreeBSD. Unlike other
+// syscalls it returns the error number itself, not -1 + errno, so it can't
+// use the generic stub. If the kernel lacks it (FreeBSD before 11.1), fall
+// back to nanosleep (240), which sleeps on CLOCK_REALTIME's rate: fine for
+// relative sleeps; absolute ones are turned into relative ones first.
+
+const SYS_NANOSLEEP: u64 = 240;
+const SYS_CLOCK_GETTIME: u64 = 232;
+const SYS_CLOCK_NANOSLEEP: u64 = 244;
+const TIMER_ABSTIME: c_int = 1;
+const EINVAL: c_int = 22;
+
+#[no_mangle]
+pub unsafe extern "C" fn clock_nanosleep(clock: c_int, flags: c_int, rq: *const Timespec, rm: *mut Timespec) -> c_int {
+    let saved = *__error();
+    let ret = syscall6(SYS_CLOCK_NANOSLEEP, [clock as u64, flags as u64, rq as u64, rm as u64, 0, 0]);
+    let err = *__error();
+    *__error() = saved;
+    if ret == 0 {
+        return 0;
+    }
+    if err != ENOSYS {
+        return err;
+    }
+    if rq.is_null() {
+        return EINVAL;
+    }
+    let mut req = *rq;
+    if flags & TIMER_ABSTIME != 0 {
+        let mut now = Timespec { sec: 0, nsec: 0 };
+        if syscall6(SYS_CLOCK_GETTIME, [clock as u64, &mut now as *mut _ as u64, 0, 0, 0, 0]) != 0 {
+            let e = *__error();
+            *__error() = saved;
+            return e;
+        }
+        req.sec -= now.sec;
+        req.nsec -= now.nsec;
+        if req.nsec < 0 {
+            req.nsec += 1_000_000_000;
+            req.sec -= 1;
+        }
+        if req.sec < 0 {
+            return 0;
+        }
+    }
+    // rm is only filled in for relative sleeps, as POSIX says.
+    let rm = if flags & TIMER_ABSTIME != 0 { core::ptr::null_mut() } else { rm };
+    let ret = syscall6(SYS_NANOSLEEP, [&req as *const _ as u64, rm as u64, 0, 0, 0, 0]);
+    let err = *__error();
+    *__error() = saved;
+    if ret == 0 { 0 } else { err }
+}
