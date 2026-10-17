@@ -17,7 +17,8 @@
 //! - a patched copy of the SDK libc.a (see build.rs) so its own code that
 //!   uses the 11 layouts keeps them, and `fts_*` stubs that keep the SDK's
 //!   fts (which would hand FreeBSD 11 structs to Rust) out of the link.
-//! - `getrandom` (FreeBSD 12+), over `arc4random_buf`.
+//! - `getrandom` (FreeBSD 12+), over `arc4random_buf`;
+//! - the SDK's raw syscall stubs, regenerated with error checking (build.rs).
 use core::ffi::{c_char, c_int, c_void};
 
 const F_SETFD: c_int = 2;
@@ -329,10 +330,8 @@ pub unsafe extern "C" fn fstat(fd: c_int, buf: *mut Stat12) -> c_int {
     stat_call(SYS_FSTAT11, [fd as u64, 0, 0, 0, 0, 0], 1, buf)
 }
 
-// fstatat: build.rs renames the SDK's to __sdk_fstatat in the bundled libc
-// copy so this name is free. We don't call __sdk_fstatat: it's a bare
-// `syscall` stub that returns errno as a positive value on failure instead
-// of -1 + errno, so this goes through syscall6, which checks the carry flag.
+// fstatat: the SDK's lives in syscalls.o, which never gets linked (build.rs
+// regenerates its stubs and leaves this one out), so this name is free.
 const SYS_FSTATAT11: u64 = 493;
 
 #[no_mangle]
@@ -637,3 +636,8 @@ pub extern "C" fn fts_get_stream(_: *mut c_void) -> *mut c_void {
 }
 #[no_mangle]
 pub extern "C" fn fts_set_clientptr(_: *mut c_void, _: *mut c_void) {}
+
+// ---------------------------------------------------------------------------
+// The SDK's raw syscall stubs, regenerated with error checking (see
+// build.rs, part 3).
+core::arch::global_asm!(include_str!(concat!(env!("OUT_DIR"), "/syscalls.s")), options(att_syntax, raw));

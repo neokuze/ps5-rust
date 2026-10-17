@@ -33,6 +33,7 @@ std-examples/          std payloads (own workspace, std target):
   kq_probe             diagnostics for the kqueue/fd calls tokio needs
   fs_probe             std::fs checks in a scratch dir under /data (port 9958)
   https_probe          DNS + HTTPS GET with rustls/ring, verified certs (port 9959)
+  err_probe            syscall/std error reporting, writes nothing (port 9960)
 ```
 
 `ps5` modules (each one behind a Cargo feature that links the Sony libraries it needs):
@@ -115,13 +116,21 @@ definition would clash) and contains code compiled for the FreeBSD 11 layouts (`
 with `llvm-objcopy` (no SDK binaries are stored in this repo) and bundles it into its rlib,
 which the linker reads before the SDK's own:
 
-- the SDK's `fstatat` is renamed out of the way, and `ps5-std-rt` provides a FreeBSD 12 one;
 - `mktemp`'s calls to `stat`/`lstat` go to FreeBSD 11 versions, matching how it was built;
 - `scandir`/`alphasort` are reimplemented; `fts_*` are stubs that fail with `ENOSYS`, so the
-  SDK's fts, which would hand FreeBSD 11 structs to Rust, never gets linked.
+  SDK's fts, which would hand FreeBSD 11 structs to Rust, never gets linked;
+- `syscalls.o` is dropped. Its ~230 raw syscall stubs (`dup`, `openat`, `unlinkat`, ... and
+  `fstatat`) don't check the carry flag, so on failure they return the errno value as if it
+  were a result (e.g. `openat` "returns" fd 2 for `ENOENT`). The build script regenerates every
+  one of them, with the SDK's own syscall numbers, plus the FreeBSD error epilogue
+  (`-1` + `errno`); a stub with an unexpected shape stops the build. `fstatat` is the FreeBSD 12
+  wrapper in `ps5-std-rt` instead. `err_probe` checks the error paths.
 
 For this the std target sets `no-default-libraries` and lists the Sony libraries itself in
 `late-link-args`: `prospero-clang` would otherwise put the SDK's `-lc` ahead of everything.
+
+The PS5 kernel doesn't implement every FreeBSD syscall. `faccessat` and `readlinkat` fail with
+`ENOSYS` (std doesn't use either).
 
 ## Requirements
 

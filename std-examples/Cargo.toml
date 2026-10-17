@@ -2,7 +2,7 @@
 # root workspace because they build with another target and build-std set.
 [workspace]
 resolver = "2"
-members = ["hello_std", "tokio_server", "kq_probe", "fs_probe", "https_probe"]
+members = ["hello_std", "tokio_server", "kq_probe", "fs_probe", "https_probe", "err_probe"]
 
 [workspace.package]
 version = "0.1.0"
