@@ -20,6 +20,10 @@
 //! - `getrandom` (FreeBSD 12+), over `arc4random_buf`;
 //! - the SDK's raw syscall stubs, regenerated with error checking (build.rs);
 //! - `faccessat`/`readlinkat`, which the PS5 kernel lacks, over access/readlink.
+//! - `clock_nanosleep` (ENOSYS on the PS5), over nanosleep;
+//! - a blocking `accept` that waits in kevent first: a thread asleep in
+//!   accept when the console enters rest mode powers it off; recv,
+//!   recvfrom and recvmsg wait the same way.
 use core::ffi::{c_char, c_int, c_void};
 
 const F_SETFD: c_int = 2;
@@ -31,7 +35,6 @@ const SOCK_CLOEXEC: c_int = 0x1000_0000;
 const SOCK_NONBLOCK: c_int = 0x2000_0000;
 
 extern "C" {
-    fn accept(fd: c_int, addr: *mut c_void, len: *mut u32) -> c_int;
     fn close(fd: c_int) -> c_int;
 }
 
@@ -751,4 +754,142 @@ pub unsafe extern "C" fn clock_nanosleep(clock: c_int, flags: c_int, rq: *const 
     let err = *__error();
     *__error() = saved;
     if ret == 0 { 0 } else { err }
+}
+
+// ---------------------------------------------------------------------------
+// accept: measured on 13.60, a thread asleep inside a blocking accept() when
+// the console enters rest mode powers the console off, while a thread asleep
+// in kevent on the same socket survives (rest_block / rest_kevent probes).
+// So for a blocking socket, wait for a connection in kevent first and only
+// then call accept. Non-blocking sockets (tokio, mio) go straight through.
+//
+// There is a short window between kevent reporting a connection and accept
+// taking it; if the client resets in between, accept blocks as before.
+
+const SYS_ACCEPT: u64 = 30;
+const SYS_KQUEUE: u64 = 362;
+const SYS_CLOSE: u64 = 6;
+const EVFILT_READ: i16 = -1;
+const EV_ADD: u16 = 0x1;
+const EV_ONESHOT: u16 = 0x10;
+const EINTR: c_int = 4;
+
+/// Sleeps in kevent until `fd` is readable. Returns -1 with errno only for
+/// EINTR (which the caller must report); any other failure returns 0 so the
+/// caller falls back to its normal blocking call.
+unsafe fn wait_readable(fd: c_int) -> c_int {
+    let fl = sys_fcntl(fd, F_GETFL, 0);
+    if fl < 0 || fl & O_NONBLOCK != 0 {
+        return 0;
+    }
+    kevent_wait(fd, core::ptr::null())
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn accept(fd: c_int, addr: *mut c_void, len: *mut u32) -> c_int {
+    if wait_readable(fd) < 0 {
+        return -1;
+    }
+    syscall6(SYS_ACCEPT, [fd as u64, addr as u64, len as u64, 0, 0, 0]) as c_int
+}
+
+// ---------------------------------------------------------------------------
+// recv/recvfrom/recvmsg (std's TcpStream/UdpSocket reads): the same kevent
+// wait as accept, for a blocking socket, so no thread sleeps inside the
+// receive call itself. SO_RCVTIMEO (std's set_read_timeout) becomes the
+// kevent timeout, and runs out with EAGAIN as the real call would. The SDK
+// takes these from libkernel_web.so; a static definition here wins.
+
+const SYS_RECVMSG: u64 = 27;
+const SYS_RECVFROM: u64 = 29;
+const SYS_GETSOCKOPT: u64 = 118;
+const SOL_SOCKET: c_int = 0xffff;
+const SO_RCVTIMEO: c_int = 0x1006;
+const MSG_DONTWAIT: c_int = 0x80;
+const EAGAIN: c_int = 35;
+
+#[repr(C)]
+struct Timeval {
+    sec: i64,
+    usec: i64,
+}
+
+/// For a blocking socket, sleeps in kevent until it's readable or its
+/// SO_RCVTIMEO runs out. -1 + errno (EINTR, or EAGAIN on timeout) means the
+/// receive must report that; 0 means go ahead with it.
+unsafe fn wait_socket_readable(fd: c_int, flags: c_int) -> c_int {
+    if flags & MSG_DONTWAIT != 0 {
+        return 0;
+    }
+    let fl = sys_fcntl(fd, F_GETFL, 0);
+    if fl < 0 || fl & O_NONBLOCK != 0 {
+        return 0;
+    }
+    let saved = *__error();
+    let mut tv = Timeval { sec: 0, usec: 0 };
+    let mut len = core::mem::size_of::<Timeval>() as u32;
+    let r = syscall6(SYS_GETSOCKOPT, [
+        fd as u64, SOL_SOCKET as u64, SO_RCVTIMEO as u64,
+        &mut tv as *mut _ as u64, &mut len as *mut _ as u64, 0,
+    ]);
+    *__error() = saved;
+    if r < 0 {
+        return 0; // not a socket: leave it to the real call
+    }
+    let ts = Timespec { sec: tv.sec, nsec: tv.usec * 1000 };
+    let timeout = if tv.sec == 0 && tv.usec == 0 { core::ptr::null() } else { &ts as *const Timespec };
+    kevent_wait(fd, timeout)
+}
+
+/// Shared by accept and the receives: one-shot EVFILT_READ wait on a
+/// private kqueue. Only EINTR and a timeout are reported; other failures
+/// return 0 so the caller falls back to its plain blocking call.
+unsafe fn kevent_wait(fd: c_int, timeout: *const Timespec) -> c_int {
+    let saved = *__error();
+    let kq = syscall6(SYS_KQUEUE, [0; 6]);
+    if kq < 0 {
+        *__error() = saved;
+        return 0;
+    }
+    let ch = Kevent11 {
+        ident: fd as usize, filter: EVFILT_READ, flags: EV_ADD | EV_ONESHOT,
+        fflags: 0, data: 0, udata: core::ptr::null_mut(),
+    };
+    let mut ev = ch;
+    let r = syscall6(SYS_KEVENT, [kq as u64, &ch as *const _ as u64, 1, &mut ev as *mut _ as u64, 1, timeout as u64]);
+    let err = *__error();
+    syscall6(SYS_CLOSE, [kq as u64, 0, 0, 0, 0, 0]);
+    if r < 0 && err == EINTR {
+        *__error() = EINTR;
+        return -1;
+    }
+    if r == 0 && !timeout.is_null() {
+        *__error() = EAGAIN;
+        return -1;
+    }
+    *__error() = saved;
+    0
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn recvfrom(
+    fd: c_int, buf: *mut c_void, len: usize, flags: c_int, from: *mut c_void, fromlen: *mut u32,
+) -> isize {
+    if wait_socket_readable(fd, flags) < 0 {
+        return -1;
+    }
+    syscall6(SYS_RECVFROM, [fd as u64, buf as u64, len as u64, flags as u64, from as u64, fromlen as u64]) as isize
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn recv(fd: c_int, buf: *mut c_void, len: usize, flags: c_int) -> isize {
+    recvfrom(fd, buf, len, flags, core::ptr::null_mut(), core::ptr::null_mut())
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn recvmsg(fd: c_int, msg: *mut c_void, flags: c_int) -> isize {
+    if wait_socket_readable(fd, flags) < 0 {
+        return -1;
+    }
+    syscall6(SYS_RECVMSG, [fd as u64, msg as u64, flags as u64, 0, 0, 0]) as isize
 }

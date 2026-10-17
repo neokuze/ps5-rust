@@ -832,6 +832,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "rest_kevent"
+version = "0.1.0"
+dependencies = [
+ "ps5",
+ "ps5-std-rt",
+ "tokio",
+]
+
+[[package]]
 name = "rest_net"
 version = "0.1.0"
 dependencies = [
@@ -841,6 +850,14 @@ dependencies = [
 
 [[package]]
 name = "rest_probe"
+version = "0.1.0"
+dependencies = [
+ "ps5",
+ "ps5-std-rt",
+]
+
+[[package]]
+name = "rest_recv"
 version = "0.1.0"
 dependencies = [
  "ps5",

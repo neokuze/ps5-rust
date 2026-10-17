@@ -36,6 +36,12 @@ std-examples/          std payloads (own workspace, std target):
   err_probe            syscall/std error reporting, writes nothing (port 9960)
   reqwest_probe        reqwest async + blocking over HTTP/HTTPS, redirect, timeout (port 9962)
   stdout_probe         where fds 0-2 go (the loader socket) and println! redirection (port 10000)
+  rest_probe           clock gaps + listener across rest mode (port 10001; blocking, see below)
+  rest_idle            rest-mode isolation: resident payload with no sockets
+  rest_net             rest-mode isolation: non-blocking listener (port 10002)
+  rest_block           rest-mode isolation: thread blocked in accept (port 10003)
+  rest_kevent          rest-mode isolation: tokio waiting in kevent (port 10004)
+  rest_recv            rest-mode: blocked read + read timeout (port 10005)
 ```
 
 `ps5` modules (each one behind a Cargo feature that links the Sony libraries it needs):
@@ -138,6 +144,25 @@ directory fd they stay `ENOSYS`, since FreeBSD 11 can't rebuild that path reliab
 `faccessat(..., AT_EACCESS)` also stays `ENOSYS`: a payload runs with real uid 1 and effective
 uid 0, so `access` (which checks the real ids) would answer for the wrong user. Other things
 `err_probe` found on the console: `/data` doesn't support symlinks (`EOPNOTSUPP`).
+
+`clock_nanosleep` is missing too (`ENOSYS`), and it returns its error number directly instead
+of `-1`/`errno`, so std's `thread::sleep` hit an assertion. `ps5-std-rt` implements it over
+`nanosleep`.
+
+### Rest mode
+
+Measured on firmware 13.60 with the `rest_*` probes:
+
+- A payload survives rest mode: the process is frozen and carries on after wake. The clocks
+  don't show how long it slept (both `CLOCK_REALTIME` and `CLOCK_MONOTONIC` jumped only about
+  13-17 s, one after the other), so a "woke up" check has to look for a gap in either clock.
+- **A thread asleep inside a blocking `accept()` when the console enters rest powers the
+  console off.** A thread asleep in `kevent` on the same socket survives. So `ps5-std-rt`
+  makes blocking `accept`, `recv`, `recvfrom` and `recvmsg` wait in `kevent` first (honouring
+  `SO_RCVTIMEO`) and only then make the call. Non-blocking sockets (tokio) are untouched.
+  Blocking `connect`, `send`/`write` and `poll` aren't covered or tested yet.
+- After wake, sockets fail with Sony's os error 163, and new sockets opened by payloads fail
+  the same way until the console restarts. Plan for a payload that is alive but offline.
 
 ## Requirements
 
