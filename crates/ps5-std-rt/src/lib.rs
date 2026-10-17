@@ -18,7 +18,8 @@
 //!   uses the 11 layouts keeps them, and `fts_*` stubs that keep the SDK's
 //!   fts (which would hand FreeBSD 11 structs to Rust) out of the link.
 //! - `getrandom` (FreeBSD 12+), over `arc4random_buf`;
-//! - the SDK's raw syscall stubs, regenerated with error checking (build.rs).
+//! - the SDK's raw syscall stubs, regenerated with error checking (build.rs);
+//! - `faccessat`/`readlinkat`, which the PS5 kernel lacks, over access/readlink.
 use core::ffi::{c_char, c_int, c_void};
 
 const F_SETFD: c_int = 2;
@@ -641,3 +642,59 @@ pub extern "C" fn fts_set_clientptr(_: *mut c_void, _: *mut c_void) {}
 // The SDK's raw syscall stubs, regenerated with error checking (see
 // build.rs, part 3).
 core::arch::global_asm!(include_str!(concat!(env!("OUT_DIR"), "/syscalls.s")), options(att_syntax, raw));
+
+// ---------------------------------------------------------------------------
+// faccessat/readlinkat: the PS5 kernel returns ENOSYS for these *at syscalls
+// (489, 500). For the usual cases (AT_FDCWD or an absolute path) the plain
+// FreeBSD 11 syscalls do the same job (access, readlink; the kernel lacks
+// eaccess too, see faccessat). Relative to another directory fd
+// there's no reliable way to rebuild the path on FreeBSD 11, so that stays
+// ENOSYS rather than guessing.
+
+const AT_FDCWD: c_int = -100;
+const AT_EACCESS: c_int = 0x100;
+const SYS_ACCESS: u64 = 33;
+const SYS_READLINK: u64 = 58;
+const SYS_EACCESS: u64 = 376;
+
+unsafe fn at_cwd_or_absolute(fd: c_int, path: *const c_char) -> bool {
+    fd == AT_FDCWD || (!path.is_null() && *path == b'/' as c_char)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn faccessat(fd: c_int, path: *const c_char, mode: c_int, flag: c_int) -> c_int {
+    if !at_cwd_or_absolute(fd, path) || flag & !AT_EACCESS != 0 {
+        *__error() = ENOSYS;
+        return -1;
+    }
+    if flag & AT_EACCESS == 0 {
+        return syscall6(SYS_ACCESS, [path as u64, mode as u64, 0, 0, 0, 0]) as c_int;
+    }
+    let ret = syscall6(SYS_EACCESS, [path as u64, mode as u64, 0, 0, 0, 0]) as c_int;
+    if ret == 0 || *__error() != ENOSYS {
+        return ret;
+    }
+    // The PS5 kernel lacks eaccess too. access checks the real ids instead
+    // of the effective ones, so it gives the same answer exactly when they
+    // match; otherwise there's no faithful substitute.
+    let ids = |n| syscall6(n, [0; 6]);
+    if ids(SYS_GETUID) == ids(SYS_GETEUID) && ids(SYS_GETGID) == ids(SYS_GETEGID) {
+        return syscall6(SYS_ACCESS, [path as u64, mode as u64, 0, 0, 0, 0]) as c_int;
+    }
+    *__error() = ENOSYS;
+    -1
+}
+
+const SYS_GETUID: u64 = 24;
+const SYS_GETEUID: u64 = 25;
+const SYS_GETEGID: u64 = 43;
+const SYS_GETGID: u64 = 47;
+
+#[no_mangle]
+pub unsafe extern "C" fn readlinkat(fd: c_int, path: *const c_char, buf: *mut c_char, size: usize) -> isize {
+    if !at_cwd_or_absolute(fd, path) {
+        *__error() = ENOSYS;
+        return -1;
+    }
+    syscall6(SYS_READLINK, [path as u64, buf as u64, size as u64, 0, 0, 0]) as isize
+}

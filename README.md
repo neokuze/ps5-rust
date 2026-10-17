@@ -129,8 +129,13 @@ which the linker reads before the SDK's own:
 For this the std target sets `no-default-libraries` and lists the Sony libraries itself in
 `late-link-args`: `prospero-clang` would otherwise put the SDK's `-lc` ahead of everything.
 
-The PS5 kernel doesn't implement every FreeBSD syscall. `faccessat` and `readlinkat` fail with
-`ENOSYS` (std doesn't use either).
+The PS5 kernel doesn't implement every FreeBSD syscall: `faccessat`, `readlinkat` and
+`eaccess` return `ENOSYS`. `ps5-std-rt` emulates the first two with `access` and `readlink`
+when the path is absolute or relative to `AT_FDCWD` (the usual case); relative to another
+directory fd they stay `ENOSYS`, since FreeBSD 11 can't rebuild that path reliably.
+`faccessat(..., AT_EACCESS)` also stays `ENOSYS`: a payload runs with real uid 1 and effective
+uid 0, so `access` (which checks the real ids) would answer for the wrong user. Other things
+`err_probe` found on the console: `/data` doesn't support symlinks (`EOPNOTSUPP`).
 
 ## Requirements
 

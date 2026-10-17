@@ -1,6 +1,7 @@
 //! Diagnostic for syscall error reporting: provokes failures (missing paths,
 //! bad fds, refused connections) and checks they come back as -1 + errno /
-//! io::Error. Writes nothing. Results on port 9960
+//! io::Error. Writes only a symlink in /data/ps5-rust-err-probe-tmp, removed
+//! again. Results on port 9960
 //! (curl http://<ps5-ip>:9960), then exits.
 use ps5::Toast;
 use ps5_std_rt as _;
@@ -35,6 +36,7 @@ unsafe fn sdk_style_fstatat(fd: c_int, path: *const c_char, buf: *mut u8, flag: 
 const AT_FDCWD: c_int = -100;
 const EBADF: i32 = 9;
 const ENOENT: i32 = 2;
+const EINVAL: i32 = 22;
 const ENOSYS: i32 = 78;
 
 fn toast(msg: &str) {
@@ -53,6 +55,11 @@ fn expect_err(out: &mut Vec<String>, name: &str, ret: i64, want: i32) {
     } else {
         format!("FAIL {name}: returned {ret}, errno {got} (want -1 errno {want})")
     });
+}
+
+/// A libc call that must succeed (return 0).
+fn expect_ok(out: &mut Vec<String>, name: &str, ret: i64) {
+    out.push(if ret == 0 { format!("ok   {name}: 0") } else { format!("FAIL {name}: returned {ret}, errno {}", errno()) });
 }
 
 /// A std call that must fail with the given kind.
@@ -83,10 +90,36 @@ fn main() {
         expect_err(&mut out, "renameat missing", renameat(AT_FDCWD, missing.as_ptr(), AT_FDCWD, missing2.as_ptr()) as i64, ENOENT);
         let mut lb = [0 as c_char; 64];
         let root = CString::new("/").unwrap();
-        // The PS5 kernel doesn't implement these two (ENOSYS); what matters
-        // here is that the failure is reported, not hidden as success.
-        expect_err(&mut out, "faccessat (kernel: ENOSYS)", faccessat(AT_FDCWD, missing.as_ptr(), 0, 0) as i64, ENOSYS);
-        expect_err(&mut out, "readlinkat (kernel: ENOSYS)", readlinkat(AT_FDCWD, root.as_ptr(), lb.as_mut_ptr(), 64) as i64, ENOSYS);
+        // The PS5 kernel lacks these two *at syscalls; ps5-std-rt emulates
+        // them with access/eaccess/readlink for AT_FDCWD and absolute paths.
+        expect_err(&mut out, "faccessat missing", faccessat(AT_FDCWD, missing.as_ptr(), 0, 0) as i64, ENOENT);
+        let data = CString::new("/data").unwrap();
+        expect_ok(&mut out, "faccessat /data F_OK", faccessat(AT_FDCWD, data.as_ptr(), 0, 0) as i64);
+        {
+            extern "C" {
+                fn getuid() -> u32;
+                fn geteuid() -> u32;
+                fn getgid() -> u32;
+                fn getegid() -> u32;
+            }
+            out.push(format!(
+                "info ids: uid {} euid {} gid {} egid {}",
+                getuid(), geteuid(), getgid(), getegid()
+            ));
+        }
+        let r = faccessat(AT_FDCWD, data.as_ptr(), 0, 0x100) as i64;
+        out.push(match (r, errno()) {
+            (0, _) => "ok   faccessat /data AT_EACCESS: 0".into(),
+            (-1, ENOSYS) => "ok   faccessat /data AT_EACCESS: ENOSYS (no eaccess and real != effective ids)".into(),
+            (r, e) => format!("FAIL faccessat /data AT_EACCESS: returned {r}, errno {e}"),
+        });
+        let rel = CString::new("data").unwrap();
+        let rootfd = openat(AT_FDCWD, root.as_ptr(), 0);
+        expect_err(&mut out, "faccessat relative to dir fd (unsupported)", faccessat(rootfd, rel.as_ptr(), 0, 0) as i64, ENOSYS);
+        if rootfd >= 0 {
+            std::os::fd::OwnedFd::from_raw_fd_checked(rootfd);
+        }
+        expect_err(&mut out, "readlinkat not-a-link", readlinkat(AT_FDCWD, root.as_ptr(), lb.as_mut_ptr(), 64) as i64, EINVAL);
         expect_err(&mut out, "syscall(SYS_dup, -1)", syscall(41, -1 as c_int) as i64, EBADF);
 
         // Success paths still work.
@@ -96,6 +129,36 @@ fn main() {
             std::os::fd::OwnedFd::from_raw_fd_checked(fd);
         }
     }
+
+    // readlinkat / fs::read_link on a real symlink, in a scratch dir that is
+    // removed again (the only thing this probe writes).
+    let tmp = "/data/ps5-rust-err-probe-tmp";
+    let _ = std::fs::remove_dir_all(tmp);
+    match std::fs::create_dir(tmp).and_then(|_| std::os::unix::fs::symlink("target-text", format!("{tmp}/link"))) {
+        // /data's filesystem has no symlinks (EOPNOTSUPP): nothing to read.
+        Err(e) if e.raw_os_error() == Some(45) => {
+            out.push("info /data doesn't support symlinks (EOPNOTSUPP); readlinkat on a real link not tested".into())
+        }
+        Err(e) => out.push(format!("FAIL symlink setup: {e}")),
+        Ok(()) => {
+            let link = CString::new(format!("{tmp}/link")).unwrap();
+            let mut b = [0u8; 64];
+            let n = unsafe { readlinkat(AT_FDCWD, link.as_ptr(), b.as_mut_ptr().cast(), b.len()) };
+            out.push(if n >= 0 && &b[..n as usize] == b"target-text" {
+                "ok   readlinkat symlink: target-text".to_string()
+            } else {
+                format!("FAIL readlinkat symlink: {n} errno {}", errno())
+            });
+            out.push(match std::fs::read_link(format!("{tmp}/link")) {
+                Ok(p) if p.as_os_str() == "target-text" => "ok   fs::read_link: target-text".to_string(),
+                r => format!("FAIL fs::read_link: {r:?}"),
+            });
+        }
+    }
+    out.push(match std::fs::remove_dir_all(tmp) {
+        Ok(()) if !std::path::Path::new(tmp).exists() => "ok   scratch dir removed".to_string(),
+        r => format!("FAIL scratch dir cleanup: {r:?}"),
+    });
 
     let dir = "/data/ps5-rust-err-probe-missing";
     expect_kind(&mut out, "fs::remove_dir_all missing", std::fs::remove_dir_all(dir), ErrorKind::NotFound);
