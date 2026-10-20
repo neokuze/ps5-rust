@@ -42,6 +42,7 @@ std-examples/          std payloads (own workspace, std target):
   rest_block           rest-mode isolation: thread blocked in accept (port 10003)
   rest_kevent          rest-mode isolation: tokio waiting in kevent (port 10004)
   rest_recv            rest-mode: blocked read + read timeout (port 10005)
+  udp_probe            std + tokio UdpSocket: loopback, timeout, broadcast, DNS to 1.1.1.1 (port 10006)
 ```
 
 `ps5` modules (each one behind a Cargo feature that links the Sony libraries it needs):
