@@ -167,6 +167,17 @@ Measured on firmware 13.60 with the `rest_*` probes:
 
 ## Requirements
 
+On Linux or WSL (Debian/Ubuntu, Arch or Fedora), `scripts/setup.sh` installs all of this:
+the system packages, Rust nightly, the latest SDK release in `/opt/ps5-payload-sdk`, and
+`PS5_PAYLOAD_SDK` / `PS5_HOST` in your shell's startup file (bash, zsh or fish). It asks
+before each step that needs sudo, and it's safe to run again.
+
+```bash
+bash scripts/setup.sh
+```
+
+What it sets up:
+
 - Linux or WSL with the [PS5 Payload SDK](https://github.com/ps5-payload-dev/sdk) at
   `/opt/ps5-payload-sdk` (or set `PS5_PAYLOAD_SDK`, and point
   `CARGO_TARGET_X86_64_SIE_PS5_LINKER` at its `bin/prospero-clang`)
@@ -179,7 +190,14 @@ Measured on firmware 13.60 with the `rest_*` probes:
 ```bash
 make                                        # builds build/*.elf
 make test EXAMPLE=hwinfo PS5_HOST=<ps5-ip>  # build + send to the PS5
+
+make std                                                  # std examples -> build/std/*.elf
+make std-test STD_EXAMPLE=tokio_server PS5_HOST=<ps5-ip>  # build + send one
 ```
+
+Every `.elf` goes through `prospero-strip`, which drops the symbol tables (about a quarter
+of a std payload: `reqwest_probe` goes from 2.7 MB to 2.0 MB). To skip typing the address,
+`export PS5_HOST=<ps5-ip>` once in the shell.
 
 For `http_test`, start the server on your PC first, then build the payload with your PC's
 address:

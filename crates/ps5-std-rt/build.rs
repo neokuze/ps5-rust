@@ -36,13 +36,27 @@ fn main() {
     let libc = sdk.join("target/lib/libc.a");
     println!("cargo:rerun-if-changed={}", libc.display());
 
-    let patched = out.join("libps5c.a");
-    let mut cmd = Command::new(sdk.join("bin/llvm-objcopy"));
+    let objcopy = sdk.join("bin/llvm-objcopy");
+    assert!(
+        objcopy.exists(),
+        "PS5 Payload SDK not found at {} (no bin/llvm-objcopy): set PS5_PAYLOAD_SDK to the SDK's install directory",
+        sdk.display()
+    );
+    // The SDK tools run in a scratch dir under the system temp dir, and only
+    // plain file contents are written to OUT_DIR. On a WSL /mnt/c checkout,
+    // OUT_DIR is a Windows drive where a normal user can create files but not
+    // chmod/chown them, which fs::copy, objcopy and `ar x` all try to do.
+    let work = env::temp_dir().join(format!("ps5-std-rt-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&work);
+    fs::create_dir_all(&work).unwrap_or_else(|e| panic!("creating {}: {e}", work.display()));
+    let patched = work.join("libps5c.a");
+    let bytes = fs::read(&libc).unwrap_or_else(|e| panic!("reading {}: {e}", libc.display()));
+    fs::write(&patched, bytes).unwrap();
+    let mut cmd = Command::new(objcopy);
     for (from, to) in RENAMES {
         cmd.arg(format!("--redefine-sym={from}={to}"));
     }
     let status = cmd
-        .arg(&libc)
         .arg(&patched)
         .status()
         .unwrap_or_else(|e| panic!("running llvm-objcopy from {}: {e}", sdk.display()));
@@ -54,11 +68,13 @@ fn main() {
         .status()
         .expect("running llvm-ar");
     assert!(status.success(), "removing syscalls.o from the libc copy");
+    fs::write(out.join("libps5c.a"), fs::read(&patched).unwrap()).unwrap();
 
     // Bundled into the rlib, so it comes before std's `-lc` on the link line.
     println!("cargo:rustc-link-lib=static=ps5c");
 
-    gen_syscall_stubs(&sdk, &out);
+    gen_syscall_stubs(&sdk, &work, &out);
+    let _ = fs::remove_dir_all(&work);
 }
 
 // ---------------------------------------------------------------------------
@@ -77,9 +93,9 @@ fn main() {
 /// Stubs src/lib.rs defines itself.
 const STUB_SKIP: &[&str] = &["fstatat", "faccessat", "readlinkat", "clock_nanosleep", "accept"];
 
-pub fn gen_syscall_stubs(sdk: &std::path::Path, out: &std::path::Path) {
+pub fn gen_syscall_stubs(sdk: &std::path::Path, work: &std::path::Path, out: &std::path::Path) {
     let status = Command::new(sdk.join("bin/llvm-ar"))
-        .current_dir(out)
+        .current_dir(work)
         .arg("x")
         .arg(sdk.join("target/lib/libc.a"))
         .arg("syscalls.o")
@@ -94,7 +110,7 @@ pub fn gen_syscall_stubs(sdk: &std::path::Path, out: &std::path::Path) {
     let bindir = String::from_utf8(bindir.stdout).unwrap().trim().to_owned();
     let dump = Command::new(std::path::Path::new(&bindir).join("llvm-objdump"))
         .args(["-d", "--no-show-raw-insn", "--no-leading-addr"])
-        .arg(out.join("syscalls.o"))
+        .arg(work.join("syscalls.o"))
         .output()
         .expect("running llvm-objdump");
     assert!(dump.status.success(), "disassembling syscalls.o");

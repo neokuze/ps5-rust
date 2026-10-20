@@ -216,7 +216,7 @@ pub unsafe extern "C" fn fcntl(fd: c_int, cmd: c_int, arg: usize) -> c_int {
 
 #[repr(C)]
 #[derive(Clone, Copy)]
-struct Timespec {
+pub struct Timespec {
     sec: i64,
     nsec: i64,
 }
