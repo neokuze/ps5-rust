@@ -3,7 +3,9 @@
 #   make                                     build all no_std examples
 #   make EXAMPLE=hwinfo test                 build + send one to the PS5 loader
 #   make std                                 build all std examples
-#   make std-test STD_EXAMPLE=tokio_server   build + send one std example
+#   make std-test STD_EXAMPLE=tokio_server   build + send one std example; its
+#                                            println! output shows up here
+#   make std-run STD_EXAMPLE=println_demo    same, plus your keyboard on its stdin
 # The console's address: PS5_HOST=192.168.1.49 (or set it once with
 # `export PS5_HOST=192.168.1.49`).
 PS5_PAYLOAD_SDK ?= /opt/ps5-payload-sdk
@@ -49,7 +51,15 @@ std-test:
 	@$(call STRIP,$(STD_OUT)/$(STD_EXAMPLE),build/std/$(STD_EXAMPLE).elf)
 	$(DEPLOY) build/std/$(STD_EXAMPLE).elf
 
+# Like std-test, but also forwards your keyboard to the payload's stdin
+# (scripts/run.sh: returns as soon as the payload exits).
+std-run:
+	cd std-examples && cargo build --release -p $(STD_EXAMPLE)
+	@mkdir -p build/std
+	@$(call STRIP,$(STD_OUT)/$(STD_EXAMPLE),build/std/$(STD_EXAMPLE).elf)
+	scripts/run.sh -h $(PS5_HOST) -p $(PS5_PORT) build/std/$(STD_EXAMPLE).elf
+
 clean:
 	cargo clean; cd std-examples && cargo clean; rm -rf build
 
-.PHONY: all test std std-test clean
+.PHONY: all test std std-test std-run clean

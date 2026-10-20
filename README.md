@@ -43,6 +43,7 @@ std-examples/          std payloads (own workspace, std target):
   rest_kevent          rest-mode isolation: tokio waiting in kevent (port 10004)
   rest_recv            rest-mode: blocked read + read timeout (port 10005)
   udp_probe            std + tokio UdpSocket: loopback, timeout, broadcast, DNS to 1.1.1.1 (port 10006)
+  println_demo         println!/eprintln! to the sender terminal + reading stdin
 ```
 
 `ps5` modules (each one behind a Cargo feature that links the Sony libraries it needs):
@@ -193,7 +194,15 @@ make test EXAMPLE=hwinfo PS5_HOST=<ps5-ip>  # build + send to the PS5
 
 make std                                                  # std examples -> build/std/*.elf
 make std-test STD_EXAMPLE=tokio_server PS5_HOST=<ps5-ip>  # build + send one
+make std-run STD_EXAMPLE=println_demo PS5_HOST=<ps5-ip>   # same + keyboard on stdin
 ```
+
+The ELF loader hands the payload the connection it was sent over as stdin/stdout/stderr, so
+`println!`/`eprintln!` output shows up in the terminal that ran `make std-test`. `make std-run`
+(`scripts/run.sh`) also forwards what you type to the payload's stdin and returns as soon as the
+payload exits. If that terminal is closed while the payload still prints, the next `println!`
+panics (write to a closed socket); use `writeln!(std::io::stdout(), ...)` and ignore the error
+where that matters.
 
 Every `.elf` goes through `prospero-strip`, which drops the symbol tables (about a quarter
 of a std payload: `reqwest_probe` goes from 2.7 MB to 2.0 MB). To skip typing the address,
